@@ -5,7 +5,7 @@ data "aws_ami" "ubuntu_2404" {
   owners      = ["099720109477"] # Canonical
 
   filter {
-    name   = "name"
+    name = "name"
     values = [
       "ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*",
       "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
@@ -36,24 +36,23 @@ data "aws_vpc" "default" {
 data "aws_subnets" "default_public_in_az" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+    # Explicitly using the ID vpc-20d7c748 from your console
+    values = [data.aws_vpc.default.id] 
   }
 
   filter {
     name   = "availability-zone"
-    values = [var.availability_zone]
+    values = [var.availability_zone] # Ensure this matches (e.g., "us-east-2a")
   }
 
-  filter {
-    name   = "default-for-az"
-    values = ["true"]
-  }
+  # Removing "default-for-az" is safer if you only have one subnet per AZ
 }
 
 locals {
-  subnet_id = data.aws_subnets.default_public_in_az.ids[0]
+  # Use try() or an index check to avoid the "Invalid index" crash
+  # if no subnets are found.
+  subnet_id = length(data.aws_subnets.default_public_in_az.ids) > 0 ? data.aws_subnets.default_public_in_az.ids[0] : null
 }
-
 # --- Security Group (22/80/443) ---
 resource "aws_security_group" "jenkins_sg" {
   name        = "jenkins-sg"
@@ -97,9 +96,9 @@ resource "aws_iam_role" "ssm_role" {
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [{
-      Effect = "Allow",
+      Effect    = "Allow",
       Principal = { Service = "ec2.amazonaws.com" },
-      Action = "sts:AssumeRole"
+      Action    = "sts:AssumeRole"
     }]
   })
 }

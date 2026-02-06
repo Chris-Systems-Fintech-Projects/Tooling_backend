@@ -5,7 +5,7 @@
 variable "region" {
   description = "AWS region for all resources."
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "name_prefix" {
@@ -56,7 +56,7 @@ variable "ssh_key_name" {
 variable "availability_zone" {
   description = "AZ to place the instance/subnet in"
   type        = string
-  default     = "us-west-2a"
+  default     = "us-east-2a"
 }
 
 
@@ -126,15 +126,5 @@ variable "allow_create_slr" {
   default     = true
 }
 
-variable "allocate_eip" {
-  description = "If true, allocate and attach a new Elastic IP to the build node."
-  type        = bool
-  default     = true
-}
 
-variable "eip_allocation_id" {
-  description = "Optional existing EIP allocation ID (eipalloc-xxxx) to attach instead of creating a new one."
-  type        = string
-  default     = null
-}
 

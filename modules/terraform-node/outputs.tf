@@ -29,13 +29,3 @@ output "build_node_private_ip" {
 }
 
 
-output "build_node_eip_public_ip" {
-  description = "Public IP address of the build node's Elastic IP (if attached)"
-  value       = try(aws_eip.build[0].public_ip, null)
-}
-
-output "build_node_eip_allocation_id" {
-  description = "Allocation ID of the Elastic IP used by the build node"
-  value       = var.eip_allocation_id != null ? var.eip_allocation_id : try(aws_eip.build[0].id, null)
-}
-

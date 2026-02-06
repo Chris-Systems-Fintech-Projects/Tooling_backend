@@ -7,7 +7,7 @@ variable "instance_type" {
 variable "ssh_key_name" {
   description = "The key name for the Jenkins server"
   type        = string
-  default     = "Oregon-private-key"
+  default     = "demo-40"
 }
 
 variable "main-region" {

@@ -31,11 +31,17 @@ install_base_ubuntu() {
   log "Updating apt and installing base packages (Ubuntu 24.04)..."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  # NOTE: apt-transport-https is built-in on modern apt; no need to install.
+  
+  # Replaced openjdk-17-jre with openjdk-21-jre
   apt-get install -y --no-install-recommends \
     ca-certificates curl unzip tar git jq gpg gpg-agent lsb-release \
-    python3 python3-venv pipx bash-completion fontconfig openjdk-17-jre make
+    python3 python3-venv pipx bash-completion fontconfig openjdk-21-jre make
+  
   update-ca-certificates
+
+  # Ensure Java 21 is set as the default
+  update-java-alternatives --set java-1.21.0-openjdk-$(dpkg --print-architecture) || true
+
   # Ensure pipx path
   command -v pipx >/dev/null 2>&1 || python3 -m pip install -U pipx --break-system-packages
   pipx ensurepath || true
@@ -150,6 +156,7 @@ install_yq() {
 readiness_report() {
   log "Tool readiness report"
   echo "-----------------------------------------------------------"
+  java -version 2>&1 | head -n 1 || true
   aws --version || true
   terraform -version | head -n1 || true
   kubectl version --client=true || true

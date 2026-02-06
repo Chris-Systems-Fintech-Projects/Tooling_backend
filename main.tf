@@ -1,14 +1,14 @@
 module "jenkins-server" {
   source        = "./modules/jenkins-server"
   instance_type = var.instance_type
-  ssh_key_name      = var.key_name
+  ssh_key_name  = var.key_name
 }
 
 module "terraform-node" {
   source        = "./modules/terraform-node"
   instance_type = var.instance_type
-  ssh_key_name      = var.key_name
-  region   = var.region
+  ssh_key_name  = var.key_name
+  region        = var.region
 }
 
 # module "maven-sonarqube-server" {

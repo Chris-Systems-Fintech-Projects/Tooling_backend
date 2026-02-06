@@ -214,16 +214,14 @@ resource "aws_iam_role_policy" "ec2_role_iam_exceptions" {
 
 # Allocate a new EIP (only when requested and when the instance has/will have a public IP)
 resource "aws_eip" "build" {
-  count  = var.allocate_eip && var.associate_public_ip ? 1 : 0
   domain = "vpc"             # VPC-scoped EIP (AWS provider v5+)
   tags   = merge(var.tags, { Name = "${var.name_prefix}-build-eip" })
 }
 
 # Associate EIP to the instance (handles both new or pre-existing EIP)
 resource "aws_eip_association" "build" {
-  count         = var.associate_public_ip ? 1 : 0
   instance_id   = aws_instance.build_node.id
-  allocation_id = var.eip_allocation_id != null ? var.eip_allocation_id : try(aws_eip.build[0].id, null)
+  allocation_id = aws_eip.build.id
 
   # If you prefer to pin to the primary NIC explicitly:
   # network_interface_id = aws_instance.build_node.primary_network_interface_id
