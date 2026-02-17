@@ -35,9 +35,9 @@ data "aws_vpc" "default" {
 
 data "aws_subnets" "default_public_in_az" {
   filter {
-    name   = "vpc-id"
+    name = "vpc-id"
     # Explicitly using the ID vpc-20d7c748 from your console
-    values = [data.aws_vpc.default.id] 
+    values = [data.aws_vpc.default.id]
   }
 
   filter {
@@ -127,7 +127,7 @@ resource "aws_instance" "jenkins_server" {
 
   # Root volume sizing for Jenkins
   root_block_device {
-    volume_size           = 30
+    volume_size           = 20
     volume_type           = "gp3"
     delete_on_termination = true
   }

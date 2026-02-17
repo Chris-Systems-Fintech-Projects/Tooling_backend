@@ -7,18 +7,18 @@ variable "instance_type" {
 variable "ssh_key_name" {
   description = "The key name for the Jenkins server"
   type        = string
-  default     = "demo-40"
+  default     = "class40key"
 }
 
 variable "main-region" {
   description = "The AWS region to deploy resources"
   type        = string
-  default     = "us-west-2"
+  default     = "us-east-2"
 }
 
 variable "availability_zone" {
   description = "AZ to place the instance/subnet in"
   type        = string
-  default     = "us-west-2a"
+  default     = "us-east-2a"
 }
 

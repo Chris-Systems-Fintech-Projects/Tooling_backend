@@ -49,7 +49,7 @@ data "aws_ami" "ubuntu_2404" {
   owners      = ["099720109477"] # Canonical
 
   filter {
-    name   = "name"
+    name = "name"
     values = [
       "ubuntu/images/hvm-ssd/ubuntu-noble-24.04-amd64-server-*",
       "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*",
@@ -104,8 +104,8 @@ resource "aws_security_group" "ssh" {
 # -----------------------------------------------------------------------------
 # Managed policy ARNs built per-partition for portability
 locals {
-  admin_policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
-  ssm_core_policy_arn  = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+  admin_policy_arn    = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
+  ssm_core_policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
 # Trust policy for EC2 with optional ExternalId condition (if var.external_id set)
@@ -170,22 +170,22 @@ resource "aws_iam_role_policy" "ec2_role_iam_exceptions" {
       [
         # 1) Fix: allow role to read itself (needed by modules reading caller identity)
         {
-          "Sid"    : "AllowGetSelf",
+          "Sid" : "AllowGetSelf",
           "Effect" : "Allow",
           "Action" : ["iam:GetRole"],
-          "Resource": aws_iam_role.ec2_role.arn
+          "Resource" : aws_iam_role.ec2_role.arn
         }
       ],
       # 2) Allow PassRole to specific roles only (least-privilege)
       length(var.passrole_arns) > 0 ? [
         {
-          "Sid"    : "AllowPassSpecificRoles",
+          "Sid" : "AllowPassSpecificRoles",
           "Effect" : "Allow",
           "Action" : ["iam:PassRole"],
-          "Resource": var.passrole_arns,
-          "Condition": {
-            "StringEquals": {
-              "iam:PassedToService": [
+          "Resource" : var.passrole_arns,
+          "Condition" : {
+            "StringEquals" : {
+              "iam:PassedToService" : [
                 "eks.amazonaws.com",
                 "ec2.amazonaws.com"
               ]
@@ -196,13 +196,13 @@ resource "aws_iam_role_policy" "ec2_role_iam_exceptions" {
       # 3) (Optional) Allow creating specific service-linked roles some modules require
       var.allow_create_slr ? [
         {
-          "Sid"    : "AllowCreateServiceLinkedRoleForCommonServices",
+          "Sid" : "AllowCreateServiceLinkedRoleForCommonServices",
           "Effect" : "Allow",
           "Action" : ["iam:CreateServiceLinkedRole"],
-          "Resource": "*",
-          "Condition": {
-            "StringEquals": {
-              "iam:AWSServiceName": local.slr_services
+          "Resource" : "*",
+          "Condition" : {
+            "StringEquals" : {
+              "iam:AWSServiceName" : local.slr_services
             }
           }
         }
@@ -214,7 +214,7 @@ resource "aws_iam_role_policy" "ec2_role_iam_exceptions" {
 
 # Allocate a new EIP (only when requested and when the instance has/will have a public IP)
 resource "aws_eip" "build" {
-  domain = "vpc"             # VPC-scoped EIP (AWS provider v5+)
+  domain = "vpc" # VPC-scoped EIP (AWS provider v5+)
   tags   = merge(var.tags, { Name = "${var.name_prefix}-build-eip" })
 }
 
@@ -231,9 +231,9 @@ resource "aws_eip_association" "build" {
 # EC2 Build Node
 # -----------------------------------------------------------------------------
 resource "aws_instance" "build_node" {
-  ami                    = data.aws_ami.ubuntu_2404.id
+  ami                         = data.aws_ami.ubuntu_2404.id
   instance_type               = var.instance_type
-  subnet_id              = local.subnet_id
+  subnet_id                   = local.subnet_id
   vpc_security_group_ids      = [aws_security_group.ssh.id]
   iam_instance_profile        = aws_iam_instance_profile.ec2_profile.name
   associate_public_ip_address = var.associate_public_ip
@@ -251,12 +251,12 @@ resource "aws_instance" "build_node" {
   # Modern root volume (gp3) with adjustable size
   root_block_device {
     volume_type = "gp3"
-    volume_size = try(var.root_volume_size_gb, 30)
+    volume_size = try(var.root_volume_size_gb, 15)
     encrypted   = true
     tags        = merge(var.tags, { Name = "${var.name_prefix}-root" })
   }
 
-  user_data = var.user_data   # pass in your terraform.sh or cloud-init if desired
+  user_data = var.user_data # pass in your terraform.sh or cloud-init if desired
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-build-node" })
 }

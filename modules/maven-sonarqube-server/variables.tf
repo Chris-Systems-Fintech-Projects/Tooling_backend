@@ -6,7 +6,7 @@ variable "region" {
 variable "ami_id" {
   description = "The AMI ID for the EC2 instance"
   type        = string
-  default = "ami-0f5fcdfbd140e4ab7"
+  default     = "ami-0f5fcdfbd140e4ab7"
 }
 
 variable "instance_type" {
@@ -17,7 +17,7 @@ variable "instance_type" {
 variable "key_name" {
   description = "The key name for the Jenkins server"
   type        = string
-  default     = "jenkins-ec2"
+  default     = "class40key"
 }
 
 variable "main-region" {
@@ -29,13 +29,13 @@ variable "main-region" {
 variable "security_group_id" {
   description = "The security group ID to attach to the instance"
   type        = string
-  default = "sg-060ff40c1e36ea46b"
+  default     = "sg-060ff40c1e36ea46b"
 }
 
 variable "subnet_id" {
   description = "The subnet ID where the instance will be deployed"
   type        = string
-  default = "subnet-46d5ed2e"
+  default     = "subnet-46d5ed2e"
 }
 
 # variable "db_name" {
