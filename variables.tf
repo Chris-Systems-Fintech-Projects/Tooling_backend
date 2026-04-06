@@ -1,8 +1,8 @@
-variable "ami_id" {
-  description = "The AMI ID for the instances"
-  type        = string
-  default     = "ami-0b8c6b923777519db"
-}
+# variable "ami_id" {
+#   description = "The AMI ID for the instances"
+#   type        = string
+#   default     = "ami-0b8c6b923777519db"
+# }
 
 variable "instance_type" {
   description = "The instance type for the instances"
@@ -14,7 +14,7 @@ variable "instance_type" {
 variable "key_name" {
   description = "The key name for the instances"
   type        = string
-  default     = "DevOps_Train2024"
+  default     = "Oregon-private-key"
 }
 
 ###########################
@@ -81,21 +81,20 @@ variable "s3_bucket" {
   default     = "terraform-state-bucket-fusi"
 }
 
-variable "bucket_name" {
-  description = "The name of the S3 bucket for storing Terraform state"
-  type        = string
-  default     = "terraform-state-bucket-12354"
-}
-
-
 variable "dynamodb_table" {
   description = "The name of the DynamoDB table for state locking"
   type        = string
-  default     = "terraform-state-lock-config"
+  default     = "terraform-lock-table"
 }
 
-variable "main-region" {
+variable "region" {
   description = "The AWS region to deploy resources"
   type        = string
-  default     = "us-east-2"
+  default     = "us-west-2"
+}
+
+variable "ecr_image_repo" {
+  description = "elastic container image repository"
+  type        = string
+  default     = "addressbook"
 }

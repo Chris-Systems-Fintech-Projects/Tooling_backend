@@ -1,146 +1,276 @@
 #!/bin/bash
 set -euo pipefail
 
-### 1) kubectl client
-echo "Installing kubectl..."
-curl -fsSL -o kubectl \
-  https://s3.us-west-2.amazonaws.com/amazon-eks/1.27.12/2024-04-19/bin/linux/amd64/kubectl
-chmod +x kubectl
-mkdir -p "$HOME/bin"
-mv kubectl "$HOME/bin/"
-export PATH="$HOME/bin:$PATH"
+# ===== VERSIONS / VARS =====
+MAVEN_VERSION="3.9.11"
+SONARQUBE_VERSION="10.5.1.90531"
+POSTGRES_USER="ddsonar"
+POSTGRES_DB="ddsonarqube"
+POSTGRES_PASSWORD="Team@123"
+SONAR_USER="ddsonar"
+SONAR_GROUP="ddsonar"
+SONAR_DIR="/opt/sonarqube"
+JAVA_PKG="openjdk-17-jdk"
 
-### 2) Dependencies & AWS CLI
-echo "Updating apt and installing dependencies..."
+trap 'echo " ERROR at line $LINENO"; exit 1' ERR
+
+echo "=========================================="
+echo "  Starting SonarQube & dependencies setup"
+echo "=========================================="
+
+# ===== Clean any stale PostgreSQL PGDG repo =====
+echo "=== Cleaning any stale PostgreSQL PGDG repo entries ==="
+if [ -f /etc/apt/sources.list.d/pgdg.list ]; then
+  echo "Removing /etc/apt/sources.list.d/pgdg.list"
+  sudo rm -f /etc/apt/sources.list.d/pgdg.list
+fi
+
+# Remove any direct references in the main sources.list
+sudo sed -i '/apt\.postgresql\.org\/pub\/repos\/apt/d' /etc/apt/sources.list || true
+
+# Also clean from any other *.list files if present
+for f in /etc/apt/sources.list.d/*.list; do
+  [ -f "$f" ] || continue
+  sudo sed -i '/apt\.postgresql\.org\/pub\/repos\/apt/d' "$f" || true
+done
+
+echo "=== Updating system packages ==="
 sudo apt-get update -y
-sudo apt-get install -y wget unzip
 
-echo "Installing AWS CLI..."
-curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
-unzip -o awscliv2.zip
-sudo ./aws/install
-rm -rf awscliv2.zip aws
+echo "=== Installing base dependencies ==="
+sudo apt-get install -y wget unzip curl zip gnupg lsb-release "$JAVA_PKG" tar
 
-### 3) Java 17 (Corretto) & Maven
-echo "Installing OpenJDK 17..."
-sudo apt-get install -y openjdk-17-jdk
+# ----- kubectl -----
+install_kubectl() {
+  if ! command -v kubectl &>/dev/null; then
+    echo "Installing kubectl..."
+    curl -fsSL -o kubectl "https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.7/2025-04-17/bin/linux/amd64/kubectl"
+    chmod +x ./kubectl
+    sudo mv ./kubectl /usr/local/bin/kubectl
+  else
+    echo "kubectl already installed."
+  fi
+  echo "Verifying kubectl..."
+  kubectl version --client
+}
 
-echo "Installing Maven 3.9.9..."
-LATEST_MAVEN_VERSION=3.9.9
-wget -q "https://dlcdn.apache.org/maven/maven-3/${LATEST_MAVEN_VERSION}/binaries/apache-maven-${LATEST_MAVEN_VERSION}-bin.zip"
-sudo unzip -o apache-maven-${LATEST_MAVEN_VERSION}-bin.zip -d /opt
-sudo ln -sfn /opt/apache-maven-${LATEST_MAVEN_VERSION} /opt/maven
-rm apache-maven-${LATEST_MAVEN_VERSION}-bin.zip
+# ----- AWS CLI v2 -----
+install_aws_cli() {
+  if ! command -v aws &>/dev/null; then
+    echo "Installing AWS CLI v2..."
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+    unzip -o awscliv2.zip
+    sudo ./aws/install
+    rm -rf awscliv2.zip aws
+  else
+    echo "AWS CLI already installed."
+    aws --version
+  fi
+}
 
-echo "Configuring Maven environment variables..."
-sudo tee /etc/profile.d/maven.sh > /dev/null <<'EOF'
+# ----- Maven -----
+install_maven() {
+  if ! command -v mvn &>/dev/null || [[ "$(mvn -version | grep 'Apache Maven')" != *"$MAVEN_VERSION"* ]]; then
+    echo "Installing Maven $MAVEN_VERSION..."
+    MAVEN_TAR="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+    MAVEN_URL="https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/${MAVEN_TAR}"
+    wget -nv "$MAVEN_URL" -O "$MAVEN_TAR"
+    sudo tar -xzf "$MAVEN_TAR" -C /opt
+    sudo ln -sfn "/opt/apache-maven-${MAVEN_VERSION}" /opt/maven
+    rm "$MAVEN_TAR"
+    sudo tee /etc/profile.d/maven.sh >/dev/null <<'EOF'
 export M2_HOME=/opt/maven
 export PATH=$M2_HOME/bin:$PATH
 EOF
-source /etc/profile.d/maven.sh
+    sudo chmod +x /etc/profile.d/maven.sh
+    if ! grep -q "/etc/profile.d/maven.sh" ~/.bashrc; then
+      echo 'if [ -f /etc/profile.d/maven.sh ]; then source /etc/profile.d/maven.sh; fi' >> ~/.bashrc
+    fi
+    # shellcheck disable=SC1091
+    source /etc/profile.d/maven.sh
+  else
+    echo "Maven already installed."
+  fi
+  mvn -version
+}
 
-echo "Verifying Maven:"
-mvn -version
+# ===== Kernel & user limits for Elasticsearch =====
+echo "=== Configuring kernel & user limits for ES ==="
+sudo tee /etc/sysctl.d/99-sonarqube.conf >/dev/null <<'EOF'
+vm.max_map_count=262144
+fs.file-max=65536
+EOF
+sudo sysctl --system
 
-### 4) SonarQube 10.5.1 setup
-SONARQUBE_VERSION=10.5.1.90531
-echo "Downloading SonarQube ${SONARQUBE_VERSION}..."
-wget -q "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-${SONARQUBE_VERSION}.zip"
-sudo unzip -o sonarqube-${SONARQUBE_VERSION}.zip -d /opt
-sudo mv /opt/sonarqube-${SONARQUBE_VERSION} /opt/sonarqube
-rm sonarqube-${SONARQUBE_VERSION}.zip
-
-echo "Creating ddsonar user and group..."
-sudo groupadd --force ddsonar
-sudo useradd --system --gid ddsonar --home /opt/sonarqube --shell /bin/false ddsonar
-sudo chown -R ddsonar:ddsonar /opt/sonarqube
-sudo chmod +x /opt/sonarqube/bin/linux-x86-64/sonar.sh
-
-### 5) PostgreSQL installation & DB setup
-echo "Installing PostgreSQL..."
-sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" \
-  > /etc/apt/sources.list.d/pgdg.list'
-wget -qO - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
-sudo apt-get update -y
-sudo apt-get install -y postgresql postgresql-contrib
-
-echo "Configuring PostgreSQL user & database..."
-sudo -u postgres psql <<'EOF'
-CREATE USER ddsonar WITH ENCRYPTED PASSWORD 'Team@123';
-CREATE DATABASE ddsonarqube OWNER ddsonar;
-GRANT ALL PRIVILEGES ON DATABASE ddsonarqube TO ddsonar;
+sudo tee /etc/security/limits.d/99-sonarqube.conf >/dev/null <<EOF
+${SONAR_USER} soft nofile 65536
+${SONAR_USER} hard nofile 65536
+${SONAR_USER} soft nproc  4096
+${SONAR_USER} hard nproc  4096
 EOF
 
-### 6) Configure SonarQube to use PostgreSQL
-echo "Writing sonar.properties..."
-sudo tee /opt/sonarqube/conf/sonar.properties > /dev/null <<'EOF'
-sonar.jdbc.username=ddsonar
-sonar.jdbc.password=Team@123
-sonar.jdbc.url=jdbc:postgresql://localhost:5432/ddsonarqube
-EOF
+# ===== PostgreSQL =====
+echo "=== Installing PostgreSQL (Ubuntu repo) ==="
+if ! command -v psql &>/dev/null; then
+  echo "Using default Ubuntu PostgreSQL packages..."
+  sudo apt-get install -y postgresql postgresql-contrib
+else
+  echo "PostgreSQL already installed."
+fi
 
-### 7) Systemd service for SonarQube
-echo "Creating systemd unit for SonarQube..."
-sudo tee /etc/systemd/system/sonar.service > /dev/null <<'EOF'
+echo "=== Configuring PostgreSQL user & DB ==="
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1 \
+  || sudo -u postgres psql -c "CREATE USER ${POSTGRES_USER} WITH ENCRYPTED PASSWORD '${POSTGRES_PASSWORD}';"
+
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1 \
+  || sudo -u postgres psql -c "CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};"
+
+echo "GRANT ALL PRIVILEGES ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_USER};" | sudo -u postgres psql
+
+# ===== SonarQube install (if missing) =====
+echo "=== Installing SonarQube (if needed) ==="
+if [ ! -d "${SONAR_DIR}" ]; then
+  wget -nv "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-${SONARQUBE_VERSION}.zip"
+  sudo unzip -o "sonarqube-${SONARQUBE_VERSION}.zip" -d /opt
+  sudo mv "/opt/sonarqube-${SONARQUBE_VERSION}" "${SONAR_DIR}"
+  rm "sonarqube-${SONARQUBE_VERSION}.zip"
+else
+  echo "SonarQube already present at ${SONAR_DIR}"
+fi
+
+echo "=== Creating ${SONAR_USER}:${SONAR_GROUP} and fixing ownership ==="
+getent group "${SONAR_GROUP}" >/dev/null || sudo groupadd "${SONAR_GROUP}"
+id -u "${SONAR_USER}" &>/dev/null || sudo useradd --system --gid "${SONAR_GROUP}" --home "${SONAR_DIR}" --shell /usr/sbin/nologin "${SONAR_USER}"
+
+# Ensure required writable dirs exist and are owned by the service user
+sudo install -d -o "${SONAR_USER}" -g "${SONAR_GROUP}" "${SONAR_DIR}/data" "${SONAR_DIR}/logs" "${SONAR_DIR}/temp"
+sudo chown -R "${SONAR_USER}:${SONAR_GROUP}" "${SONAR_DIR}"
+sudo chmod +x "${SONAR_DIR}/bin/linux-x86-64/sonar.sh"
+
+# ===== SonarQube DB config =====
+echo "=== Configuring SonarQube DB connection ==="
+sudo tee "${SONAR_DIR}/conf/sonar.properties" >/dev/null <<EOF
+sonar.jdbc.username=${POSTGRES_USER}
+sonar.jdbc.password=${POSTGRES_PASSWORD}
+sonar.jdbc.url=jdbc:postgresql://localhost:5432/${POSTGRES_DB}
+# Optional: bind UI to all interfaces (comment out to keep 127.0.0.1)
+#sonar.web.host=0.0.0.0
+#sonar.web.port=9000
+EOF
+sudo chown "${SONAR_USER}:${SONAR_GROUP}" "${SONAR_DIR}/conf/sonar.properties"
+
+# ===== systemd unit =====
+echo "=== Creating systemd unit for SonarQube ==="
+sudo tee /etc/systemd/system/sonar.service >/dev/null <<EOF
 [Unit]
 Description=SonarQube service
-After=network.target
+After=network.target postgresql.service
 
 [Service]
 Type=forking
-ExecStart=/opt/sonarqube/bin/linux-x86-64/sonar.sh start
-ExecStop=/opt/sonarqube/bin/linux-x86-64/sonar.sh stop
-User=ddsonar
-Group=ddsonar
-Restart=always
+User=${SONAR_USER}
+Group=${SONAR_GROUP}
+WorkingDirectory=${SONAR_DIR}
+ExecStart=${SONAR_DIR}/bin/linux-x86-64/sonar.sh start
+ExecStop=${SONAR_DIR}/bin/linux-x86-64/sonar.sh stop
 LimitNOFILE=65536
 LimitNPROC=4096
+Restart=on-failure
+RestartSec=10
+SyslogIdentifier=sonarqube
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
+echo "=== Reloading systemd & (re)starting service ==="
 sudo systemctl daemon-reload
-sudo systemctl enable sonar.service
-sudo systemctl start sonar.service
+sudo systemctl reset-failed sonar || true
+sudo systemctl enable sonar
+sudo systemctl restart sonar
 
-### 8) Nginx & Let's Encrypt SSL
-echo "Installing Nginx & Certbot..."
-sudo apt-get install -y nginx certbot python3-certbot-nginx
-sudo ufw allow 'Nginx Full'
+echo "=== Status (one-shot) ==="
+sudo systemctl --no-pager --full status sonar || true
 
-echo "Configuring Nginx reverse proxy for SonarQube..."
-sudo tee /etc/nginx/sites-available/sonarqube.conf > /dev/null <<'EOF'
-server {
-    listen 80;
-    server_name sonarqube.dominionsystem.org;
+echo "=== Tail logs (hint) ==="
+echo "To watch live logs:"
+echo "  journalctl -u sonar -f"
+echo "Or:"
+echo "  tail -n +1 -f ${SONAR_DIR}/logs/{sonar.log,es.log,web.log,ce.log}"
 
-    location / {
-        proxy_pass http://localhost:9000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
 
-    location ~ /.well-known/acme-challenge {
-        allow all;
-    }
-}
-EOF
+### Docker cleanup & install
+echo "Removing older Docker versions if installed..."
+sudo apt-get remove -y docker docker-engine docker.io containerd runc || true
 
-sudo ln -sf /etc/nginx/sites-available/sonarqube.conf /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
+echo "Installing Docker dependencies..."
+sudo apt-get install -y \
+  apt-transport-https \
+  ca-certificates \
+  curl \
+  gnupg \
+  lsb-release
 
-echo "Obtaining SSL certificate for sonarqube.dominionsystem.org..."
-sudo certbot --nginx --non-interactive --agree-tos \
-  --email fusisoft@gmail.com \
-  -d sonarqube.dominionsystem.org
+echo "Adding Docker’s official GPG key..."
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-echo "Scheduling daily certificate renewal..."
-sudo bash -c 'echo "0 0 * * * root certbot renew --quiet" >> /etc/crontab'
+echo "Configuring Docker stable repository..."
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] \
+  https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo systemctl reload nginx
+echo "Updating package index for Docker..."
+sudo apt-get update -y
 
-echo "✅ Setup complete! Access SonarQube at: https://sonarqube.dominionsystem.org"
+echo "Installing Docker Engine..."
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+
+echo "Enabling and starting Docker service..."
+sudo systemctl enable docker
+sudo systemctl start docker
+
+echo "Adding current user ($USER) to the Docker group..."
+sudo usermod -aG docker ubuntu
+newgrp docker
+echo "Docker installation complete."
+
+# Install Maven prerequisites
+sudo apt update
+sudo apt install -y wget tar git openjdk-17-jdk
+
+#Java installation
+echo "Installing java packages........"
+sudo apt-get update -y
+sudo apt-get install openjdk-21-jdk -y
+
+
+# Define Maven version
+MAVEN_VERSION=3.9.11
+MAVEN_DIR=/opt/maven
+MAVEN_ARCHIVE=apache-maven-$MAVEN_VERSION-bin.tar.gz
+             
+# Download and extract Maven
+wget https://dlcdn.apache.org/maven/maven-3/$MAVEN_VERSION/binaries/$MAVEN_ARCHIVE -P /tmp
+    
+sudo mkdir -p $MAVEN_DIR
+sudo tar -xzf /tmp/$MAVEN_ARCHIVE -C $MAVEN_DIR
+
+
+# Set environment variables
+echo "export M2_HOME=/opt/maven/apache-maven-3.9.11" | sudo tee /etc/profile.d/maven.sh
+echo "export PATH=\$M2_HOME/bin:\$PATH" | sudo tee -a /etc/profile.d/maven.sh
+
+# Apply env vars immediately
+source /etc/profile.d/maven.sh
+
+#Install kustomize 
+curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+sudo mv kustomize /usr/local/bin/
+
+
+
+echo "ALL DONE! Access SonarQube at:  http://<server-ip>:9000"
+echo "If you changed network exposure, ensure port 9000 is open in your firewall/SG."
